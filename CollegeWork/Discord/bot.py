@@ -25,20 +25,6 @@ intents.presences = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# БД
-
-db = sqlite3.connect("timeline.db")
-cur = db.cursor()
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS timeline (
-    user_id INTEGER PRIMARY KEY,
-    messages INTEGER DEFAULT 0,
-    warns INTEGER DEFAULT 0
-)
-""")
-db.commit()
-
 
 # Закрытие тикета
 
@@ -101,19 +87,6 @@ async def clear_slash(interaction: discord.Interaction, amount: app_commands.Ran
     await interaction.response.send_message(f"🧹 Удаляю {amount} сообщений…", ephemeral=True)
     deleted = await interaction.channel.purge(limit=amount)
     await interaction.followup.send(f"✔ Удалено **{len(deleted)}** сообщений.", ephemeral=True)
-
-# Cчетчик сообщений
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    cur.execute("INSERT OR IGNORE INTO timeline (user_id) VALUES (?)", (message.author.id,))
-    cur.execute("UPDATE timeline SET messages = messages + 1 WHERE user_id = ?", (message.author.id,))
-    db.commit()
-
-    await bot.process_commands(message)
-
 
 # Тикеты
 
@@ -185,70 +158,5 @@ async def ticket_panel(interaction: discord.Interaction):
         view=TicketView()
     )
 
-# Timeline
-
-@bot.tree.command(name="timeline", description="История активности пользователя")
-async def timeline(interaction: discord.Interaction, user: discord.Member | None = None):
-    user = user or interaction.user
-
-    cur.execute("SELECT messages, warns FROM timeline WHERE user_id = ?", (user.id,))
-    row = cur.fetchone()
-    messages, warns = row if row else (0, 0)
-
-    embed = discord.Embed(
-        title=f"📊 Таймлайн {user.name}",
-        color=discord.Color.green()
-    )
-    embed.add_field(name="Сообщений", value=messages)
-    embed.add_field(name="Варнов", value=warns)
-    embed.add_field(name="На сервере с", value=user.joined_at.strftime("%d.%m.%Y"))
-
-    await interaction.response.send_message(embed=embed)
-
-# recount ПЕРЕСЧЁТ ВСЕХ СООБЩЕНИЙ
-
-@bot.tree.command(name="recount", description="Пересчитать сообщения на сервере")
-@app_commands.checks.has_permissions(administrator=True)
-async def recount(interaction: discord.Interaction):
-    await interaction.response.send_message("⏳ Сканирую историю сообщений...", ephemeral=True)
-
-    guild = interaction.guild
-    total = 0
-
-    for channel in guild.text_channels:
-        try:
-            async for msg in channel.history(limit=None):
-                if msg.author.bot:
-                    continue
-                cur.execute("INSERT OR IGNORE INTO timeline (user_id) VALUES (?)", (msg.author.id,))
-                cur.execute("UPDATE timeline SET messages = messages + 1 WHERE user_id = ?", (msg.author.id,))
-                total += 1
-        except:
-            continue
-
-    db.commit()
-    await interaction.followup.send(f"✅ Готово! Просканировано сообщений: {total}", ephemeral=True)
-
-# топ участников по сообщениям
-
-@bot.tree.command(name="topmessages", description="Топ участников по сообщениям")
-async def topmessages(interaction: discord.Interaction):
-    cur.execute("SELECT user_id, messages FROM timeline ORDER BY messages DESC LIMIT 18")
-    rows = cur.fetchall()
-
-    embed = discord.Embed(title="🏆 Топ активных участников", color=discord.Color.gold())
-
-    place = 1
-    for user_id, messages in rows:
-        member = interaction.guild.get_member(user_id)
-        if member:
-            embed.add_field(
-                name=f"{place}. {member.name}",
-                value=f"Сообщений: {messages}",
-                inline=False
-            )
-            place += 1
-
-    await interaction.response.send_message(embed=embed)
 # Запуск бота
 bot.run(TOKEN)
