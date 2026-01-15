@@ -9,7 +9,6 @@ import io
 import random
 import asyncio
 import os
-import sqlite3
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
