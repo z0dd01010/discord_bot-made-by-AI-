@@ -20,9 +20,13 @@ TICKET_CATEGORY_NAME = "🎫 Tickets"
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-intents.presences = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+class MyBot(commands.Bot):
+    async def setup_hook(self):
+        self.add_view(TicketView())
+        self.add_view(CloseTicketView())
+
+bot = MyBot(command_prefix="!", intents=intents)
 
 
 # Закрытие тикета
@@ -96,9 +100,6 @@ async def clear_slash(interaction: discord.Interaction, amount: app_commands.Ran
 @bot.event
 async def on_ready():
     try:
-        bot.add_view(TicketView())
-        bot.add_view(CloseTicketView())
-
         await bot.tree.sync()
         print(f"Слэш-команды синхронизированы как {bot.user}")
     except Exception as e:
@@ -114,6 +115,7 @@ class TicketView(discord.ui.View):
     custom_id="ticket_create"
 )
     async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         user = interaction.user
 
