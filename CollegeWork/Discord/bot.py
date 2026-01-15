@@ -21,13 +21,55 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-class MyBot(commands.Bot):
-    async def setup_hook(self):
-        self.add_view(TicketView())
-        self.add_view(CloseTicketView())
 
-bot = MyBot(command_prefix="!", intents=intents)
+class TicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
+    @discord.ui.button(
+    label="🎫 Создать тикет",
+    style=discord.ButtonStyle.green,
+    custom_id="ticket_create"
+)
+    async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        user = interaction.user
+
+        category = discord.utils.get(guild.categories, name=TICKET_CATEGORY_NAME)
+        if category is None:
+            category = await guild.create_category(TICKET_CATEGORY_NAME)
+
+        channel_name = f"ticket-{user.id}"
+        if discord.utils.get(category.channels, name=channel_name):
+            return await interaction.followup.send(
+                "❌ У тебя уже есть открытый тикет.", ephemeral=True
+            )
+
+        overwrites = {
+    guild.default_role: discord.PermissionOverwrite(view_channel=False),
+    user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+}
+
+        for role_id in STAFF_ROLE_IDS:
+            role = guild.get_role(role_id)
+            if role:
+                overwrites[role] = discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True
+                )
+        channel = await guild.create_text_channel(
+            channel_name,
+            category=category,
+            overwrites=overwrites
+        )
+
+        await channel.send(
+            f"🎫 {user.mention}, опиши свою проблему.\n"
+            "Нажми кнопку ниже, чтобы закрыть тикет.",
+            view=CloseTicketView()
+        )
 
 # Закрытие тикета
 
@@ -42,13 +84,26 @@ class CloseTicketView(discord.ui.View):
 )
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.channel.name.startswith("ticket-"):
-            return await interaction.response.send_message(
-                "❌ Это не тикет.", ephemeral=True
-            )
+            return await interaction.response.send_message("❌ Это не тикет.", ephemeral=True)
 
         await interaction.response.send_message("🔒 Тикет будет закрыт через 5 секунд.")
+
         await asyncio.sleep(5)
-        await interaction.channel.delete()
+
+        try:
+            await interaction.channel.delete()
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "❌ У меня нет прав на удаление этого канала.",
+                ephemeral=True
+            )
+
+class MyBot(commands.Bot):
+    async def setup_hook(self):
+        self.add_view(TicketView())
+        self.add_view(CloseTicketView())
+
+bot = MyBot(command_prefix="!", intents=intents)
 
 # Random
 
@@ -84,6 +139,9 @@ async def clear_slash(interaction: discord.Interaction, amount: app_commands.Ran
         return await interaction.response.send_message("❌ Тебе нужны права **Управление сообщениями**.", ephemeral=True)
 
     bot_member = interaction.guild.get_member(bot.user.id)
+    if bot_member is None:
+        bot_member = await interaction.guild.fetch_member(bot.user.id)
+
     perms = interaction.channel.permissions_for(bot_member)
     
     if not perms.manage_messages:
@@ -104,55 +162,6 @@ async def on_ready():
         print(f"Слэш-команды синхронизированы как {bot.user}")
     except Exception as e:
         print(f"Ошибка синхронизации слэш-команд: {e}")
-
-class TicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(
-    label="🎫 Создать тикет",
-    style=discord.ButtonStyle.green,
-    custom_id="ticket_create"
-)
-    async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
-        user = interaction.user
-
-        category = discord.utils.get(guild.categories, name=TICKET_CATEGORY_NAME)
-        if category is None:
-            category = await guild.create_category(TICKET_CATEGORY_NAME)
-
-        channel_name = f"ticket-{user.id}"
-        if discord.utils.get(category.channels, name=channel_name):
-            return await interaction.response.send_message(
-                "❌ У тебя уже есть открытый тикет.", ephemeral=True
-            )
-
-        overwrites = {
-    guild.default_role: discord.PermissionOverwrite(view_channel=False),
-    user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-}
-
-        for role_id in STAFF_ROLE_IDS:
-            role = guild.get_role(role_id)
-            if role:
-                overwrites[role] = discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True
-                )
-        channel = await guild.create_text_channel(
-            channel_name,
-            category=category,
-            overwrites=overwrites
-        )
-
-        await channel.send(
-            f"🎫 {user.mention}, опиши свою проблему.\n"
-            "Нажми кнопку ниже, чтобы закрыть тикет.",
-            view=CloseTicketView()
-        )
 
 @bot.tree.command(name="ticket-panel", description="Панель создания тикетов")
 @app_commands.checks.has_permissions(administrator=True)
