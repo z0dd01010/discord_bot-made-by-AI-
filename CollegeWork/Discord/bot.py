@@ -79,9 +79,13 @@ async def clear_slash(interaction: discord.Interaction, amount: app_commands.Ran
     if not interaction.user.guild_permissions.manage_messages:
         return await interaction.response.send_message("❌ Тебе нужны права **Управление сообщениями**.", ephemeral=True)
 
-    perms = interaction.channel.permissions_for(interaction.guild.me)
+    bot_member = interaction.guild.get_member(bot.user.id)
+    perms = interaction.channel.permissions_for(bot_member)
+    
     if not perms.manage_messages:
-        return await interaction.response.send_message("❌ У меня нет прав **Управление сообщениями**.", ephemeral=True)
+        return await interaction.response.send_message(
+        "❌ У меня нет прав **Управление сообщениями**.", ephemeral=True
+    )
 
     await interaction.response.send_message(f"🧹 Удаляю {amount} сообщений…", ephemeral=True)
     deleted = await interaction.channel.purge(limit=amount)
