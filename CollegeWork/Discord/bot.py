@@ -237,11 +237,7 @@ async def on_message_edit(before: discord.Message, after: discord.Message):
     embed.set_thumbnail(url=before.author.display_avatar.url)
 
     await send_log(embed)
-<<<<<<< HEAD
 
-=======
-    
->>>>>>> 5ce6e9d (add one more logs settings)
 @bot.tree.command(name="ticket-panel", description="Панель создания тикетов")
 @app_commands.checks.has_permissions(administrator=True)
 async def ticket_panel(interaction: discord.Interaction):
