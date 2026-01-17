@@ -181,6 +181,25 @@ async def on_member_join(member: discord.Member):
 
     await send_log(embed)
 
+@bot.event
+async def on_member_remove(member: discord.Member):
+    embed = discord.Embed(
+        title="🚪 Участник вышел",
+        color=discord.Color.red()
+    )
+    embed.add_field(
+        name="Пользователь",
+        value=f"{member} ({member.id})",
+        inline=False
+    )
+    embed.add_field(
+        name="Аккаунт создан",
+        value=member.created_at.strftime("%d.%m.%Y %H:%M"),
+        inline=False
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+
+    await send_log(embed)
 @bot.tree.command(name="ticket-panel", description="Панель создания тикетов")
 @app_commands.checks.has_permissions(administrator=True)
 async def ticket_panel(interaction: discord.Interaction):
