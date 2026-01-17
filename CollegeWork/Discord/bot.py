@@ -16,6 +16,7 @@ if not TOKEN:
 STAFF_ROLE_IDS = [1424204029919232090]
 TICKET_CATEGORY_NAME = "🎫 Tickets"
 LOG_CHANNEL_ID = 1461940592581021819
+clear_in_progress = set()
 
 #  Настройки бота
 intents = discord.Intents.default()
@@ -155,8 +156,13 @@ async def clear_slash(interaction: discord.Interaction, amount: app_commands.Ran
         "❌ У меня нет прав **Управление сообщениями**.", ephemeral=True
     )
 
+    clear_in_progress.add(interaction.channel.id)
+
     await interaction.response.send_message(f"🧹 Удаляю {amount} сообщений…", ephemeral=True)
     deleted = await interaction.channel.purge(limit=amount)
+
+    clear_in_progress.discard(interaction.channel.id)
+
     await interaction.followup.send(f"✔ Удалено **{len(deleted)}** сообщений.", ephemeral=True)
 
 # Тикеты
@@ -235,6 +241,31 @@ async def on_message_edit(before: discord.Message, after: discord.Message):
         inline=False
     )
     embed.set_thumbnail(url=before.author.display_avatar.url)
+
+    await send_log(embed)
+
+@bot.event
+async def on_message_delete(message: discord.Message):
+    if message.channel.id in clear_in_progress:
+        return
+    if message.author is None or message.author.bot:
+        return
+    if not message.content:
+        return
+    embed = discord.Embed(
+        title="🗑 Сообщение удалено",
+        description=(
+            f"**Автор:** {message.author.mention}\n"
+            f"**Канал:** {message.channel.mention}"
+        ),
+        color=discord.Color.red()
+    )
+    embed.add_field(
+        name="Текст сообщения",
+        value=message.content[:800],
+        inline=False
+    )
+    embed.set_thumbnail(url=message.author.display_avatar.url)
 
     await send_log(embed)
 
