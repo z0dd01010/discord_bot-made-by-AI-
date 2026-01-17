@@ -15,6 +15,7 @@ if not TOKEN:
     raise RuntimeError("❌ DISCORD_TOKEN не найден. Проверь файл .env")
 STAFF_ROLE_IDS = [1424204029919232090]
 TICKET_CATEGORY_NAME = "🎫 Tickets"
+LOG_CHANNEL_ID = 1461940592581021819
 
 #  Настройки бота
 intents = discord.Intents.default()
@@ -105,6 +106,11 @@ class MyBot(commands.Bot):
 
 bot = MyBot(command_prefix="!", intents=intents)
 
+async def send_log(embed: discord.Embed):
+    channel = bot.get_channel(LOG_CHANNEL_ID)
+    if channel:
+        await channel.send(embed=embed)
+
 # Random
 
 @bot.tree.command(name="random", description="Задай вопрос, и я дам случайный ответ!")
@@ -162,6 +168,18 @@ async def on_ready():
         print(f"Слэш-команды синхронизированы как {bot.user}")
     except Exception as e:
         print(f"Ошибка синхронизации слэш-команд: {e}")
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    embed = discord.Embed(
+        title="🚪 Участник зашёл",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="Пользователь", value=f"{member} ({member.id})", inline=False)
+    embed.add_field(name="Аккаунт создан", value=member.created_at.strftime("%d.%m.%Y %H:%M"), inline=False)
+    embed.set_thumbnail(url=member.display_avatar.url)
+
+    await send_log(embed)
 
 @bot.tree.command(name="ticket-panel", description="Панель создания тикетов")
 @app_commands.checks.has_permissions(administrator=True)
