@@ -199,8 +199,49 @@ async def on_member_remove(member: discord.Member):
     )
     embed.set_thumbnail(url=member.display_avatar.url)
 
-    await send_log(embed)
+@bot.event
+async def on_message_edit(before: discord.Message, after: discord.Message):
+    if before.author.bot:
+        return
+    if before.content == after.content:
+        return
+    embed = discord.Embed(
+        title="✏️ Сообщение отредактировано",
+        color=discord.Color.orange()
+    )
+    embed.add_field(
+        name="Автор",
+        value=f"{before.author} ({before.author.id})",
+        inline=False
+    )
+    embed.add_field(
+        name="Канал",
+        value=before.channel.mention,
+        inline=False
+    )
+    embed.add_field(
+        name="Было",
+        value=before.content[:1000] if before.content else "*пусто*",
+        inline=False
+    )
+    embed.add_field(
+        name="Стало",
+        value=after.content[:1000] if after.content else "*пусто*",
+        inline=False
+    )
+    embed.add_field(
+        name="Ссылка",
+        value=f"[Перейти к сообщению]({after.jump_url})",
+        inline=False
+    )
+    embed.set_thumbnail(url=before.author.display_avatar.url)
 
+    await send_log(embed)
+<<<<<<< HEAD
+
+=======
+    
+>>>>>>> 5ce6e9d (add one more logs settings)
 @bot.tree.command(name="ticket-panel", description="Панель создания тикетов")
 @app_commands.checks.has_permissions(administrator=True)
 async def ticket_panel(interaction: discord.Interaction):
