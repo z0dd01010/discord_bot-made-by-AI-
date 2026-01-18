@@ -3,9 +3,6 @@ load_dotenv()
 import discord
 from discord.ext import commands
 from discord import app_commands
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import aiohttp
-import io
 import random
 import asyncio
 import os
@@ -17,6 +14,9 @@ STAFF_ROLE_IDS = [1424204029919232090]
 TICKET_CATEGORY_NAME = "🎫 Tickets"
 LOG_CHANNEL_ID = 1461940592581021819
 clear_in_progress = set()
+ticket_creation_locks = {}  # user_id -> asyncio.Lock
+ticket_closing_locks = {}  # channel_id -> asyncio.Lock
+_lock_creation_lock = asyncio.Lock()  # Глобальная блокировка для создания блокировок
 
 #  Настройки бота
 intents = discord.Intents.default()
@@ -38,40 +38,63 @@ class TicketView(discord.ui.View):
         guild = interaction.guild
         user = interaction.user
 
-        category = discord.utils.get(guild.categories, name=TICKET_CATEGORY_NAME)
-        if category is None:
-            category = await guild.create_category(TICKET_CATEGORY_NAME)
+        # Безопасное создание блокировки для пользователя
+        async with _lock_creation_lock:
+            if user.id not in ticket_creation_locks:
+                ticket_creation_locks[user.id] = asyncio.Lock()
+        
+        try:
+            async with ticket_creation_locks[user.id]:
+                # Проверка существующей категории
+                category = discord.utils.get(guild.categories, name=TICKET_CATEGORY_NAME)
+                if category is None:
+                    category = await guild.create_category(TICKET_CATEGORY_NAME)
 
-        channel_name = f"ticket-{user.id}"
-        if discord.utils.get(category.channels, name=channel_name):
-            return await interaction.followup.send(
-                "❌ У тебя уже есть открытый тикет.", ephemeral=True
-            )
+                # Проверка существующего тикета
+                channel_name = f"ticket-{user.id}"
+                if discord.utils.get(category.channels, name=channel_name):
+                    return await interaction.followup.send(
+                        "❌ У тебя уже есть открытый тикет.", ephemeral=True
+                    )
 
-        overwrites = {
-    guild.default_role: discord.PermissionOverwrite(view_channel=False),
-    user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-}
+                # Настройка прав доступа
+                overwrites = {
+                    guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                    user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+                }
 
-        for role_id in STAFF_ROLE_IDS:
-            role = guild.get_role(role_id)
-            if role:
-                overwrites[role] = discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True
+                # Добавление прав для ролей персонала
+                for role_id in STAFF_ROLE_IDS:
+                    role = guild.get_role(role_id)
+                    if role:
+                        overwrites[role] = discord.PermissionOverwrite(
+                            view_channel=True,
+                            send_messages=True,
+                            read_message_history=True
+                        )
+
+                # Создание канала (ВНЕ цикла!)
+                channel = await guild.create_text_channel(
+                    channel_name,
+                    category=category,
+                    overwrites=overwrites
                 )
-        channel = await guild.create_text_channel(
-            channel_name,
-            category=category,
-            overwrites=overwrites
-        )
 
-        await channel.send(
-            f"🎫 {user.mention}, опиши свою проблему.\n"
-            "Нажми кнопку ниже, чтобы закрыть тикет.",
-            view=CloseTicketView()
-        )
+                # Отправка приветственного сообщения
+                await channel.send(
+                    f"🎫 {user.mention}, опиши свою проблему.\n"
+                    "Нажми кнопку ниже, чтобы закрыть тикет.",
+                    view=CloseTicketView()
+                )
+                
+                # Уведомление пользователя
+                await interaction.followup.send(
+                    f"✅ Тикет создан: {channel.mention}", ephemeral=True
+                )
+        finally:
+            # Очистка блокировки для предотвращения утечки памяти
+            async with _lock_creation_lock:
+                ticket_creation_locks.pop(user.id, None)
 
 # Закрытие тикета
 
@@ -88,17 +111,39 @@ class CloseTicketView(discord.ui.View):
         if not interaction.channel.name.startswith("ticket-"):
             return await interaction.response.send_message("❌ Это не тикет.", ephemeral=True)
 
-        await interaction.response.send_message("🔒 Тикет будет закрыт через 5 секунд.")
-
-        await asyncio.sleep(5)
-
-        try:
-            await interaction.channel.delete()
-        except discord.Forbidden:
-            await interaction.followup.send(
-                "❌ У меня нет прав на удаление этого канала.",
-                ephemeral=True
+        channel_id = interaction.channel.id
+        
+        # Безопасное создание блокировки для канала
+        async with _lock_creation_lock:
+            if channel_id not in ticket_closing_locks:
+                ticket_closing_locks[channel_id] = asyncio.Lock()
+        
+        # Проверка, не закрывается ли уже тикет
+        if ticket_closing_locks[channel_id].locked():
+            return await interaction.response.send_message(
+                "⏳ Тикет уже закрывается.", ephemeral=True
             )
+        
+        try:
+            async with ticket_closing_locks[channel_id]:
+                await interaction.response.send_message("🔒 Тикет будет закрыт через 5 секунд.")
+                await asyncio.sleep(5)
+
+                try:
+                    await interaction.channel.delete()
+                except discord.Forbidden:
+                    # Если канал не удален, отправляем сообщение
+                    await interaction.followup.send(
+                        "❌ У меня нет прав на удаление этого канала.",
+                        ephemeral=True
+                    )
+                except discord.NotFound:
+                    # Канал уже удален
+                    pass
+        finally:
+            # Очистка блокировки для предотвращения утечки памяти
+            async with _lock_creation_lock:
+                ticket_closing_locks.pop(channel_id, None)
 
 class MyBot(commands.Bot):
     async def setup_hook(self):
@@ -108,9 +153,14 @@ class MyBot(commands.Bot):
 bot = MyBot(command_prefix="!", intents=intents)
 
 async def send_log(embed: discord.Embed):
-    channel = bot.get_channel(LOG_CHANNEL_ID)
-    if channel:
-        await channel.send(embed=embed)
+    try:
+        channel = bot.get_channel(LOG_CHANNEL_ID)
+        if channel:
+            await channel.send(embed=embed)
+        else:
+            print(f"⚠️ Канал логов {LOG_CHANNEL_ID} не найден")
+    except Exception as e:
+        print(f"❌ Ошибка отправки лога: {e}")
 
 # Random
 
@@ -158,12 +208,12 @@ async def clear_slash(interaction: discord.Interaction, amount: app_commands.Ran
 
     clear_in_progress.add(interaction.channel.id)
 
-    await interaction.response.send_message(f"🧹 Удаляю {amount} сообщений…", ephemeral=True)
-    deleted = await interaction.channel.purge(limit=amount)
-
-    clear_in_progress.discard(interaction.channel.id)
-
-    await interaction.followup.send(f"✔ Удалено **{len(deleted)}** сообщений.", ephemeral=True)
+    try:
+        await interaction.response.send_message(f"🧹 Удаляю {amount} сообщений…", ephemeral=True)
+        deleted = await interaction.channel.purge(limit=amount)
+        await interaction.followup.send(f"✔ Удалено **{len(deleted)}** сообщений.", ephemeral=True)
+    finally:
+        clear_in_progress.discard(interaction.channel.id)
 
 # Тикеты
 
@@ -204,6 +254,8 @@ async def on_member_remove(member: discord.Member):
         inline=False
     )
     embed.set_thumbnail(url=member.display_avatar.url)
+    
+    await send_log(embed)
 
 @bot.event
 async def on_message_edit(before: discord.Message, after: discord.Message):
